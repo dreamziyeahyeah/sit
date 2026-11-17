@@ -9,8 +9,8 @@
   var MIN = 1, MAX = 120, DEFAULT = 10;
   var KEY = 'sit.minutes';
   var PPM = 12;                      // ruler: pixels per minute while picking
-  var RUN_PPM = 60;                  // zoomed in while sitting (5x)
-  var ZOOM_MS = 520;                 // how long the zoom in / out takes
+  var RUN_PPM = 48;                  // zoomed in while sitting (4x)
+  var ZOOM_MS = 300;                 // how long the zoom in / out takes
   var zoom = PPM;                    // the ruler's current scale (animates)
   function ppm() { return zoom; }
   var SLOP = 8;                      // px a finger may wander and still count as a tap
@@ -200,8 +200,9 @@
   }
 
   function togglePause() {
-    if (audio.paused) audio.play().catch(function () {});
+    if (audio.paused) audio.play().catch(function () { render(); });
     else audio.pause();
+    render(); // react right away (zoom, "paused") instead of waiting for the audio event
   }
 
   // Stop early (hold, back button, notification stop).
@@ -296,15 +297,18 @@
     if (target === zoomTarget) return;
     zoomTarget = target;
     if (zoomAnim) cancelAnimationFrame(zoomAnim);
-    var from = zoom, t0 = 0;
-    function step(t) {
-      if (!t0) t0 = t;
-      var k = Math.min(1, (t - t0) / ZOOM_MS);
-      var e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2; // ease in-out
+    // Ease-out: moves fastest right at the tap, then settles. The first step
+    // is drawn immediately, not on the next frame, so it reacts at once.
+    var from = zoom, t0 = performance.now();
+    function step() {
+      var k = Math.min(1, (performance.now() - t0) / ZOOM_MS);
+      var e = 1 - Math.pow(1 - k, 3);
       zoom = from + (target - from) * e;
       draw();
       zoomAnim = k < 1 ? requestAnimationFrame(step) : 0;
     }
+    t0 -= 16; // count the current frame as already started
+    zoom = from + (target - from) * (1 - Math.pow(1 - 16 / ZOOM_MS, 3));
     zoomAnim = requestAnimationFrame(step);
   }
 
@@ -359,9 +363,8 @@
     var picking = mode === 'pick';
     var top = 22;
     var scale = zoom;
-    // z: 0 = the picker's scale, 1 = zoomed in while sitting. Same ticks
-    // (one per minute), just spread wide; the numbers fade away as it zooms,
-    // since the big readout already says the minutes.
+    // z: 0 = the picker's scale, 1 = zoomed in while sitting. Same ticks and
+    // numbers (one tick per minute, a number every 10), just spread wide.
     var z = clamp((scale - PPM) / (RUN_PPM - PPM), 0, 1);
     var span = cx / scale + 1;
     var from = Math.max(0, Math.floor(pos - span));
@@ -384,10 +387,7 @@
       var px = crisp ? Math.round(x * dpr) / dpr : x;
       ctx.globalAlpha = edge;
       ctx.fillRect(px - 0.5, top, 1, len);
-      if (m % 10 === 0 && z < 1) {
-        ctx.globalAlpha = edge * (1 - z);
-        ctx.fillText(String(m), px, top + len + 17);
-      }
+      if (m % 10 === 0) ctx.fillText(String(m), px, top + len + 17);
     }
 
     // the fixed centre line
