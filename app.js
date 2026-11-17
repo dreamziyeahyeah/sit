@@ -8,7 +8,9 @@
   var BELL_AT = 7200;                // seconds into the file where the bell starts
   var MIN = 1, MAX = 120, DEFAULT = 10;
   var KEY = 'sit.minutes';
-  var PPM = 12;                      // ruler: pixels per minute
+  var PPM = 12;                      // ruler: pixels per minute while picking
+  var RUN_PPM = 60;                  // zoomed in while sitting (5x)
+  function ppm() { return mode === 'pick' ? PPM : RUN_PPM; }
   var SLOP = 8;                      // px a finger may wander and still count as a tap
   var HOLD_MS = 800;                 // hold this long to end a session
 
@@ -252,18 +254,16 @@
     } else if (mode === 'run') {
       var rem = remainingSeconds();
       if (adjusting) {
-        setText(minutesEl, clamp(Math.round(pos), MIN, MAX) + ':00');
+        setText(minutesEl, String(clamp(Math.round(pos), MIN, MAX)));
       } else {
         pos = rem / 60; // the ruler winds back toward 0
-        // a live m:ss countdown, so a running timer never looks like the picker
-        var s = Math.ceil(rem - 1e-6);
-        setText(minutesEl, Math.floor(s / 60) + ':' + (s % 60 < 10 ? '0' : '') + (s % 60));
+        setText(minutesEl, String(Math.ceil(rem / 60 - 1e-9)));
       }
       minutesEl.hidden = false;
       var paused = audio.paused;
       statusEl.hidden = !paused;
       if (paused) setText(statusEl, 'paused');
-      unitEl.hidden = true;
+      unitEl.hidden = paused;
       hintEl.hidden = !paused;
       if (paused) setText(hintEl, 'tap to resume · hold to end');
     } else {
@@ -328,9 +328,13 @@
     var cx = w / 2;
     var picking = mode === 'pick';
     var top = 22;
-    var span = cx / PPM + 2;
-    var from = Math.max(0, Math.floor(pos - span));
-    var to = Math.min(MAX, Math.ceil(pos + span));
+    var scale = ppm();
+    // Picking: a tick per minute. Sitting: zoomed in, a tick per 10 seconds
+    // and a number on every minute, so the ruler visibly creeps toward 0.
+    var sub = picking ? 1 : 6;   // ticks per minute
+    var span = cx / scale + 1;
+    var from = Math.max(0, Math.floor((pos - span) * sub));
+    var to = Math.min(MAX * sub, Math.ceil((pos + span) * sub));
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
@@ -338,28 +342,18 @@
 
     // While sitting, the stretch from 0 up to the centre line is the time
     // left: it stays in ink and winds down into the line, like an egg timer.
-    for (var m = from; m <= to; m++) {
-      var x = cx + (m - pos) * PPM;
+    for (var i = from; i <= to; i++) {
+      var x = cx + (i / sub - pos) * scale;
       var d = Math.abs(x - cx) / cx;
       if (d >= 1) continue;
       ctx.fillStyle = picking ? colors.soft : (x <= cx + 0.5 ? colors.ink : colors.dim);
       ctx.globalAlpha = 1 - Math.pow(d, 2.2); // ticks soften toward the edges
-      if (!picking && x > cx + 0.5) ctx.globalAlpha *= 0.45; // elapsed side recedes
-      var len = m % 10 === 0 ? 26 : m % 5 === 0 ? 18 : 10;
+      var major = picking ? i % 10 === 0 : i % 6 === 0;
+      var mid = picking ? i % 5 === 0 : i % 3 === 0;
+      var len = major ? 26 : mid ? 18 : 10;
       var px = picking ? Math.round(x * dpr) / dpr : x; // sub-pixel while winding, so it drifts smoothly
       ctx.fillRect(px - 0.5, top, 1, len);
-      if (m % 10 === 0) ctx.fillText(String(m), px, top + len + 17);
-    }
-
-    // While sitting: an ink band over the ticks for the time left, the "sand"
-    // that drains into the centre line.
-    if (!picking && pos > 0) {
-      var x0 = Math.max(0, cx - pos * PPM);
-      ctx.fillStyle = colors.ink;
-      for (var bx = x0; bx < cx; bx += 2) {   // soften toward the edge, like the ticks
-        ctx.globalAlpha = 1 - Math.pow((cx - bx) / cx, 2.2);
-        ctx.fillRect(bx, top - 8, Math.min(2, cx - bx), 3);
-      }
+      if (major) ctx.fillText(String(i / sub), px, top + len + 17);
     }
 
     // the fixed centre line
@@ -412,7 +406,7 @@
     stopAnim();
     if (Math.abs(pxPerMs) < 0.25) { snap(); return; }
     pxPerMs = clamp(pxPerMs, -5, 5);
-    var v = -pxPerMs / PPM;                     // minutes per ms (dragging left adds minutes)
+    var v = -pxPerMs / ppm();                     // minutes per ms (dragging left adds minutes)
     var target = clamp(Math.round(pos + v / GLIDE), MIN, MAX);
     var dist = target - pos;
     if (Math.abs(dist) < 0.01 || dist * v <= 0) { snap(); return; }
@@ -422,7 +416,7 @@
     function step(t) {
       if (!t0) t0 = t;
       var left = dist * Math.exp(-k * (t - t0));
-      if (Math.abs(left) * PPM < 0.15) { finishGlide(); return; }
+      if (Math.abs(left) * ppm() < 0.15) { finishGlide(); return; }
       pos = target - left;
       render();
       animId = requestAnimationFrame(step);
@@ -449,7 +443,7 @@
   }
   // Pixels the ruler still has to travel (0 when resting).
   function glideLeftPx() {
-    return animId && glideTarget !== null ? Math.abs(glideTarget - pos) * PPM : animId ? Infinity : 0;
+    return animId && glideTarget !== null ? Math.abs(glideTarget - pos) * ppm() : animId ? Infinity : 0;
   }
 
   /* ---------------------------------------------------------------
@@ -498,7 +492,7 @@
     }
     if (g.mode === mode && (mode === 'pick' || mode === 'run') && g.moved) {
       if (mode === 'run') adjusting = true;
-      setPos(pos - (e.clientX - g.lastX) / PPM);
+      setPos(pos - (e.clientX - g.lastX) / ppm());
       g.lastX = e.clientX;
       g.samples.push({ x: e.clientX, t: e.timeStamp });
       while (g.samples.length > 2 && e.timeStamp - g.samples[0].t > 100) g.samples.shift();
