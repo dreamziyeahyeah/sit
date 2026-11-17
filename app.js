@@ -10,7 +10,9 @@
   var KEY = 'sit.minutes';
   var PPM = 12;                      // ruler: pixels per minute while picking
   var RUN_PPM = 60;                  // zoomed in while sitting (5x)
-  function ppm() { return mode === 'pick' ? PPM : RUN_PPM; }
+  var ZOOM_MS = 520;                 // how long the zoom in / out takes
+  var zoom = PPM;                    // the ruler's current scale (animates)
+  function ppm() { return zoom; }
   var SLOP = 8;                      // px a finger may wander and still count as a tap
   var HOLD_MS = 800;                 // hold this long to end a session
 
@@ -282,7 +284,28 @@
       hintEl.hidden = false;
       setText(hintEl, 'tap to return');
     }
+    updateZoom();
     draw();
+  }
+
+  /* Zoom: in while the timer runs, out on the picker and while paused.
+     Eases between the two so the ruler visibly opens up / closes in. */
+  var zoomTarget = PPM, zoomAnim = 0;
+  function updateZoom() {
+    var target = (mode === 'done' || (mode === 'run' && !audio.paused)) ? RUN_PPM : PPM;
+    if (target === zoomTarget) return;
+    zoomTarget = target;
+    if (zoomAnim) cancelAnimationFrame(zoomAnim);
+    var from = zoom, t0 = 0;
+    function step(t) {
+      if (!t0) t0 = t;
+      var k = Math.min(1, (t - t0) / ZOOM_MS);
+      var e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2; // ease in-out
+      zoom = from + (target - from) * e;
+      draw();
+      zoomAnim = k < 1 ? requestAnimationFrame(step) : 0;
+    }
+    zoomAnim = requestAnimationFrame(step);
   }
 
   // Hold-to-end feedback: a line under the dial fills over the hold.
@@ -335,13 +358,16 @@
     var cx = w / 2;
     var picking = mode === 'pick';
     var top = 22;
-    var scale = ppm();
-    // Picking: a tick per minute. Sitting: zoomed in, a tick per 10 seconds
-    // and a number on every minute, so the ruler visibly creeps toward 0.
-    var sub = picking ? 1 : 6;   // ticks per minute
+    var scale = zoom;
+    // z: 0 = the picker's scale (a tick per minute), 1 = zoomed in while
+    // sitting (a tick per 10 s and a number on every minute). In between,
+    // the fine ticks and minute numbers fade in as the ruler zooms.
+    var z = clamp((scale - PPM) / (RUN_PPM - PPM), 0, 1);
+    var sub = z > 0 ? 6 : 1;     // ticks per minute
     var span = cx / scale + 1;
     var from = Math.max(0, Math.floor((pos - span) * sub));
     var to = Math.min(MAX * sub, Math.ceil((pos + span) * sub));
+    var crisp = z === 0 && !(mode === 'run' && !adjusting); // pixel-snap unless winding
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
@@ -353,14 +379,25 @@
       var x = cx + (i / sub - pos) * scale;
       var d = Math.abs(x - cx) / cx;
       if (d >= 1) continue;
+      var edge = 1 - Math.pow(d, 2.2); // ticks soften toward the edges
+      var len, label = -1, a = 1;
+      if (i % sub === 0) {             // a whole minute
+        var mm = i / sub;
+        var pickLen = mm % 10 === 0 ? 26 : mm % 5 === 0 ? 18 : 10;
+        len = pickLen + (26 - pickLen) * z;
+        if (mm % 10 === 0) label = 1; else if (z > 0) label = z * z;
+      } else {                         // 10 s and 30 s marks, zoomed in only
+        len = i % 3 === 0 ? 18 : 10;
+        a = z;
+      }
       ctx.fillStyle = picking ? colors.soft : (x <= cx + 0.5 ? colors.ink : colors.dim);
-      ctx.globalAlpha = 1 - Math.pow(d, 2.2); // ticks soften toward the edges
-      var major = picking ? i % 10 === 0 : i % 6 === 0;
-      var mid = picking ? i % 5 === 0 : i % 3 === 0;
-      var len = major ? 26 : mid ? 18 : 10;
-      var px = picking ? Math.round(x * dpr) / dpr : x; // sub-pixel while winding, so it drifts smoothly
+      var px = crisp ? Math.round(x * dpr) / dpr : x;
+      ctx.globalAlpha = edge * a;
       ctx.fillRect(px - 0.5, top, 1, len);
-      if (major) ctx.fillText(String(i / sub), px, top + len + 17);
+      if (label > 0) {
+        ctx.globalAlpha = edge * label;
+        ctx.fillText(String(i / sub), px, top + len + 17);
+      }
     }
 
     // the fixed centre line
