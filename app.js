@@ -9,7 +9,7 @@
   var MIN = 1, MAX = 120, DEFAULT = 10;
   var KEY = 'sit.minutes';
   var PPM = 15;                      // ruler: pixels per minute while picking
-  var RUN_PPM = PPM * 5;             // zoomed in while sitting (5x)
+  var RUN_PPM = PPM * 4;             // zoomed in while sitting (4x)
   var PAUSE_PPM = 12;                // paused: a little wider view than the picker
   var ZOOM_MS = 480;                 // how long the zoom in / out takes
   var zoom = PPM;                    // the ruler's current scale (animates)
