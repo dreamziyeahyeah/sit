@@ -359,14 +359,13 @@
     var picking = mode === 'pick';
     var top = 22;
     var scale = zoom;
-    // z: 0 = the picker's scale (a tick per minute), 1 = zoomed in while
-    // sitting (a tick per 10 s and a number on every minute). In between,
-    // the fine ticks and minute numbers fade in as the ruler zooms.
+    // z: 0 = the picker's scale, 1 = zoomed in while sitting. Same ticks
+    // (one per minute), just spread wide; the numbers fade away as it zooms,
+    // since the big readout already says the minutes.
     var z = clamp((scale - PPM) / (RUN_PPM - PPM), 0, 1);
-    var sub = z > 0 ? 6 : 1;     // ticks per minute
     var span = cx / scale + 1;
-    var from = Math.max(0, Math.floor((pos - span) * sub));
-    var to = Math.min(MAX * sub, Math.ceil((pos + span) * sub));
+    var from = Math.max(0, Math.floor(pos - span));
+    var to = Math.min(MAX, Math.ceil(pos + span));
     var crisp = z === 0 && !(mode === 'run' && !adjusting); // pixel-snap unless winding
 
     ctx.textAlign = 'center';
@@ -375,28 +374,19 @@
 
     // While sitting, the stretch from 0 up to the centre line is the time
     // left: it stays in ink and winds down into the line, like an egg timer.
-    for (var i = from; i <= to; i++) {
-      var x = cx + (i / sub - pos) * scale;
+    for (var m = from; m <= to; m++) {
+      var x = cx + (m - pos) * scale;
       var d = Math.abs(x - cx) / cx;
       if (d >= 1) continue;
       var edge = 1 - Math.pow(d, 2.2); // ticks soften toward the edges
-      var len, label = -1, a = 1;
-      if (i % sub === 0) {             // a whole minute
-        var mm = i / sub;
-        var pickLen = mm % 10 === 0 ? 26 : mm % 5 === 0 ? 18 : 10;
-        len = pickLen + (26 - pickLen) * z;
-        if (mm % 10 === 0) label = 1; else if (z > 0) label = z * z;
-      } else {                         // 10 s and 30 s marks, zoomed in only
-        len = i % 3 === 0 ? 18 : 10;
-        a = z;
-      }
+      var len = m % 10 === 0 ? 26 : m % 5 === 0 ? 18 : 10;
       ctx.fillStyle = picking ? colors.soft : (x <= cx + 0.5 ? colors.ink : colors.dim);
       var px = crisp ? Math.round(x * dpr) / dpr : x;
-      ctx.globalAlpha = edge * a;
+      ctx.globalAlpha = edge;
       ctx.fillRect(px - 0.5, top, 1, len);
-      if (label > 0) {
-        ctx.globalAlpha = edge * label;
-        ctx.fillText(String(i / sub), px, top + len + 17);
+      if (m % 10 === 0 && z < 1) {
+        ctx.globalAlpha = edge * (1 - z);
+        ctx.fillText(String(m), px, top + len + 17);
       }
     }
 
