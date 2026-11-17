@@ -9,10 +9,13 @@
   var MIN = 1, MAX = 120, DEFAULT = 10;
   var KEY = 'sit.minutes';
   var PPM = 12;                      // ruler: pixels per minute while picking
-  var RUN_PPM = 48;                  // zoomed in while sitting (4x)
-  var ZOOM_MS = 300;                 // how long the zoom in / out takes
+  var RUN_PPM = 60;                  // zoomed in while sitting (5x)
+  var ZOOM_MS = 480;                 // how long the zoom in / out takes
   var zoom = PPM;                    // the ruler's current scale (animates)
   function ppm() { return zoom; }
+  // Lowest the ruler goes: 1 minute when picking; 0 while sitting (winding it
+  // to 0 rings the bell now, like an egg timer).
+  function lo() { return mode === 'run' ? 0 : MIN; }
   var SLOP = 8;                      // px a finger may wander and still count as a tap
   var HOLD_MS = 800;                 // hold this long to end a session
 
@@ -185,7 +188,18 @@
   function applyAdjust(n) {
     adjusting = false;
     if (mode !== 'run') return;
-    n = clamp(Math.round(n), MIN, MAX);
+    n = clamp(Math.round(n), lo(), MAX);
+    if (n === 0) {
+      // Wound down to 0: ring the bell now.
+      if (audio.readyState >= 1) { pendingSeek = null; audio.currentTime = BELL_AT; }
+      else pendingSeek = BELL_AT;
+      if (audio.paused) audio.play().catch(function () {});
+      mode = 'done';
+      stopTicker();
+      updateMediaState();
+      render();
+      return;
+    }
     sessionMinutes = n;
     sessionStart = BELL_AT - n * 60;
     if (audio.readyState >= 1) {
@@ -264,7 +278,7 @@
     } else if (mode === 'run') {
       var rem = remainingSeconds();
       if (adjusting) {
-        setText(minutesEl, String(clamp(Math.round(pos), MIN, MAX)));
+        setText(minutesEl, String(clamp(Math.round(pos), lo(), MAX)));
       } else {
         pos = rem / 60; // the ruler winds back toward 0
         setText(minutesEl, String(Math.ceil(rem / 60 - 1e-9)));
@@ -297,18 +311,17 @@
     if (target === zoomTarget) return;
     zoomTarget = target;
     if (zoomAnim) cancelAnimationFrame(zoomAnim);
-    // Ease-out: moves fastest right at the tap, then settles. The first step
-    // is drawn immediately, not on the next frame, so it reacts at once.
-    var from = zoom, t0 = performance.now();
+    // Starts moving on the tap itself (no wind-up), but gently, then glides
+    // to a soft stop: half ease-out, half smoothstep.
+    function ease(k) { return 0.5 * (1 - (1 - k) * (1 - k)) + 0.5 * k * k * (3 - 2 * k); }
+    var from = zoom, t0 = performance.now() - 16; // count this frame as started
     function step() {
       var k = Math.min(1, (performance.now() - t0) / ZOOM_MS);
-      var e = 1 - Math.pow(1 - k, 3);
-      zoom = from + (target - from) * e;
+      zoom = from + (target - from) * ease(k);
       draw();
       zoomAnim = k < 1 ? requestAnimationFrame(step) : 0;
     }
-    t0 -= 16; // count the current frame as already started
-    zoom = from + (target - from) * (1 - Math.pow(1 - 16 / ZOOM_MS, 3));
+    zoom = from + (target - from) * ease(16 / ZOOM_MS);
     zoomAnim = requestAnimationFrame(step);
   }
 
@@ -406,14 +419,14 @@
   }
 
   function setPos(v) {
-    pos = clamp(v, MIN, MAX);
+    pos = clamp(v, lo(), MAX);
     render();
   }
 
   function snap() {
     stopAnim();
     glideTarget = null;
-    var target = clamp(Math.round(pos), MIN, MAX);
+    var target = clamp(Math.round(pos), lo(), MAX);
     var from = pos, t0 = 0, dur = 160;
     function step(t) {
       if (!t0) t0 = t;
@@ -441,7 +454,7 @@
     if (Math.abs(pxPerMs) < 0.25) { snap(); return; }
     pxPerMs = clamp(pxPerMs, -5, 5);
     var v = -pxPerMs / ppm();                     // minutes per ms (dragging left adds minutes)
-    var target = clamp(Math.round(pos + v / GLIDE), MIN, MAX);
+    var target = clamp(Math.round(pos + v / GLIDE), lo(), MAX);
     var dist = target - pos;
     if (Math.abs(dist) < 0.01 || dist * v <= 0) { snap(); return; }
     var k = clamp(v / dist, 0.002, 0.03);       // match the finger's speed at release
