@@ -10,6 +10,7 @@
   var KEY = 'sit.minutes';
   var PPM = 15;                      // ruler: pixels per minute while picking
   var RUN_PPM = PPM * 5;             // zoomed in while sitting (5x)
+  var PAUSE_PPM = 12;                // paused: a little wider view than the picker
   var ZOOM_MS = 480;                 // how long the zoom in / out takes
   var zoom = PPM;                    // the ruler's current scale (animates)
   function ppm() { return zoom; }
@@ -307,7 +308,9 @@
      Eases between the two so the ruler visibly opens up / closes in. */
   var zoomTarget = PPM, zoomAnim = 0;
   function updateZoom() {
-    var target = (mode === 'done' || (mode === 'run' && !audio.paused)) ? RUN_PPM : PPM;
+    var target = mode === 'pick' ? PPM
+      : (mode === 'run' && audio.paused) ? PAUSE_PPM
+      : RUN_PPM;
     if (target === zoomTarget) return;
     zoomTarget = target;
     if (zoomAnim) cancelAnimationFrame(zoomAnim);
