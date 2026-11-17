@@ -4,13 +4,13 @@
   /* ---------------------------------------------------------------
      Constants
   --------------------------------------------------------------- */
-  var AUDIO_URL = 'sit-bell-v2.ogg'; // 2 h of silence, then the bell
+  var AUDIO_URL = 'sit-bell-v3.ogg'; // 2 h of silence, then the bell
   var BELL_AT = 7200;                // seconds into the file where the bell starts
   var MIN = 1, MAX = 120, DEFAULT = 10;
   var KEY = 'sit.minutes';
   var PPM = 12;                      // ruler: pixels per minute
   var SLOP = 8;                      // px a finger may wander and still count as a tap
-  var HOLD_MS = 1500;                // hold this long to end a session
+  var HOLD_MS = 800;                 // hold this long to end a session
 
   var $ = function (id) { return document.getElementById(id); };
   var app = $('app');
@@ -175,6 +175,26 @@
     startTicker();
   }
 
+  // Sliding during a session: the ruler came to rest on a new time left.
+  // Move the track so the bell lands exactly that many minutes from now.
+  var adjusting = false;     // the finger (or a glide) owns the ruler, not the audio
+  function applyAdjust(n) {
+    adjusting = false;
+    if (mode !== 'run') return;
+    n = clamp(Math.round(n), MIN, MAX);
+    sessionMinutes = n;
+    sessionStart = BELL_AT - n * 60;
+    if (audio.readyState >= 1) {
+      pendingSeek = null;
+      audio.currentTime = sessionStart;
+    } else {
+      pendingSeek = sessionStart;
+    }
+    setupMediaSession();
+    updateMediaState();
+    render();
+  }
+
   function togglePause() {
     if (audio.paused) audio.play().catch(function () {});
     else audio.pause();
@@ -182,6 +202,8 @@
 
   // Stop early (hold, back button, notification stop).
   function endSession() {
+    stopAnim();
+    adjusting = false;
     if (mode === 'run') {
       clearMediaSession();
       resetAudio();
@@ -207,6 +229,8 @@
     if (mode === 'run' && pendingSeek === null && audio.readyState >= 1 &&
         (audio.currentTime >= BELL_AT - 0.02 || audio.ended)) {
       mode = 'done';
+      stopAnim();
+      adjusting = false;
       stopTicker();
       updateMediaState();
     }
@@ -227,8 +251,12 @@
       hintEl.hidden = true;
     } else if (mode === 'run') {
       var rem = remainingSeconds();
-      pos = rem / 60; // the ruler winds back toward 0
-      setText(minutesEl, String(Math.ceil(rem / 60 - 1e-9)));
+      if (adjusting) {
+        setText(minutesEl, String(clamp(Math.round(pos), MIN, MAX)));
+      } else {
+        pos = rem / 60; // the ruler winds back toward 0
+        setText(minutesEl, String(Math.ceil(rem / 60 - 1e-9)));
+      }
       minutesEl.hidden = false;
       var paused = audio.paused;
       statusEl.hidden = !paused;
@@ -352,9 +380,7 @@
       pos = from + (target - from) * e;
       if (k >= 1) {
         animId = 0;
-        pos = target;
-        if (target !== chosen) { chosen = target; saveMinutes(chosen); }
-        render();
+        landed(target);
         return;
       }
       render();
@@ -393,10 +419,19 @@
   function finishGlide() {
     stopAnim();
     if (glideTarget === null) return;
-    pos = glideTarget;
+    var t = glideTarget;
     glideTarget = null;
-    if (pos !== chosen) { chosen = pos; saveMinutes(chosen); }
-    render();
+    landed(t);
+  }
+  // The ruler came to rest on a whole minute.
+  function landed(n) {
+    pos = n;
+    if (mode === 'pick') {
+      if (n !== chosen) { chosen = n; saveMinutes(chosen); }
+      render();
+    } else if (mode === 'run') {
+      applyAdjust(n);  // while sitting: the new time left (the picked default stays as it was)
+    }
   }
   // Pixels the ruler still has to travel (0 when resting).
   function glideLeftPx() {
@@ -406,7 +441,7 @@
   /* ---------------------------------------------------------------
      Gestures. The whole screen is the control:
        pick: slide to set, tap to begin
-       run:  tap to pause / resume, hold to end
+       run:  slide to change the time left, tap to pause / resume, hold to end
        done: tap to go back to the ruler
   --------------------------------------------------------------- */
   var g = null;
@@ -421,8 +456,8 @@
       moved: false, wasMoving: false, holdFired: false, holdTimer: 0,
       samples: [{ x: e.clientX, t: e.timeStamp }]
     };
-    if (mode === 'pick' && animId) {
-      // Nearly at rest: treat it as resting, so this tap can start the timer.
+    if ((mode === 'pick' || mode === 'run') && animId) {
+      // Nearly at rest: treat it as resting, so this tap acts as a plain tap.
       if (glideLeftPx() < 3) finishGlide();
       else { stopAnim(); glideTarget = null; g.wasMoving = true; render(); }
     }
@@ -447,7 +482,8 @@
       clearTimeout(g.holdTimer);
       setHolding(false);
     }
-    if (g.mode === 'pick' && mode === 'pick' && g.moved) {
+    if (g.mode === mode && (mode === 'pick' || mode === 'run') && g.moved) {
+      if (mode === 'run') adjusting = true;
       setPos(pos - (e.clientX - g.lastX) / PPM);
       g.lastX = e.clientX;
       g.samples.push({ x: e.clientX, t: e.timeStamp });
@@ -470,12 +506,11 @@
     setHolding(false);
     if (gg.holdFired || gg.mode !== mode) return; // the screen changed mid-gesture
 
-    if (mode === 'pick') {
+    if (mode === 'pick' || mode === 'run') {
       if (gg.moved) fling(velocity(gg.samples, e.clientX, e.timeStamp));
       else if (gg.wasMoving) snap();
-      else startSession(chosen);
-    } else if (mode === 'run') {
-      if (!gg.moved) togglePause();
+      else if (mode === 'pick') startSession(chosen);
+      else togglePause();
     } else if (mode === 'done') {
       if (!gg.moved) { endSession(); stepBack(); }
     }
@@ -485,9 +520,9 @@
     if (!g || e.pointerId !== g.id) return;
     clearTimeout(g.holdTimer);
     setHolding(false);
-    var wasDragging = g.mode === 'pick' && (g.moved || g.wasMoving);
+    var wasDragging = g.mode === mode && (g.moved || g.wasMoving);
     g = null;
-    if (wasDragging && mode === 'pick') snap();
+    if (wasDragging && (mode === 'pick' || mode === 'run')) snap();
   });
 
   app.addEventListener('contextmenu', function (e) { e.preventDefault(); });

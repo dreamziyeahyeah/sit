@@ -1,7 +1,7 @@
 // Offline cache. Bump VERSION whenever an app file changes.
-// The audio file is versioned by name (sit-bell-v2.ogg) and never changes in place.
-var VERSION = 'sit-v3';
-var AUDIO = 'sit-bell-v2.ogg';
+// The audio file is versioned by name (sit-bell-v3.ogg) and never changes in place.
+var VERSION = 'sit-v4';
+var AUDIO = 'sit-bell-v3.ogg';
 var FILES = [
   './',
   'index.html',

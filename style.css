@@ -145,10 +145,10 @@ body {
   background: var(--ink-soft);
   transform: scaleX(0);
 }
-/* starts after a short delay so a quick tap shows nothing; full at 1.5 s */
+/* starts after a short delay so a quick tap shows nothing; full at 0.8 s */
 .run.holding .hold {
   transform: scaleX(1);
-  transition: transform 1.3s linear .2s;
+  transition: transform .62s linear .18s;
 }
 
 @media (max-height: 560px) {

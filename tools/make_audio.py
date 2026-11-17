@@ -1,9 +1,9 @@
-"""Builds sit-bell-v2.ogg: 2 hours of silence followed by one soft bell strike.
+"""Builds sit-bell-v3.ogg: 2 hours of silence followed by one soft bell strike.
 
 The app starts playback N minutes before the bell, so the phone simply plays the
 file through (even with the screen off) and the bell rings at the end.
 
-v2: shorter (about 5 s), pure partials with no detuned pairs (v1's beating
+v3: about 7 s (v2 was 5 s; v1 11 s), pure partials with no detuned pairs (v1's beating
 sounded phasey), and no hiss (see the concat note below).
 
 Needs ffmpeg with libopus on PATH. No Python packages required.
@@ -12,19 +12,19 @@ import math, os, struct, subprocess, wave
 
 RATE = 48000
 SILENCE_S = 7200          # 120 minutes: the longest session
-BELL_S = 5.5              # total length of the bell
-FADE_S = 1.5              # gentle fade over the last part, so it ends in silence
+BELL_S = 7.0              # total length of the bell
+FADE_S = 2.0           # gentle fade over the last part, so it ends in silence
 OUT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TMP_WAV = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bell.wav')
-OUT = os.path.join(OUT_DIR, 'sit-bell-v2.ogg')
+OUT = os.path.join(OUT_DIR, 'sit-bell-v3.ogg')
 
 # Bell partials: (frequency ratio, relative amplitude, decay time constant in s)
 F0 = 220.0  # A3: low and warm
 PARTIALS = [
-    (1.000, 1.00, 1.9),
-    (2.000, 0.30, 1.2),
-    (2.756, 0.22, 0.9),
-    (5.404, 0.06, 0.5),
+    (1.000, 1.00, 2.5),
+    (2.000, 0.30, 1.6),
+    (2.756, 0.22, 1.2),
+    (5.404, 0.06, 0.65),
 ]
 ATTACK_S = 0.012           # soft mallet: rounded, no click
 PEAK = 0.45                # about -7 dBFS: present but not startling
