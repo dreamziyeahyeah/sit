@@ -215,6 +215,13 @@
     pos = chosen;
     stopTicker();
     render();
+    setTimeout(reloadIfIdle, 300);
+  }
+
+  // A new version arrived: switch to it once we are back on the picker.
+  var updateReady = false;
+  function reloadIfIdle() {
+    if (updateReady && mode === 'pick' && !g) location.reload();
   }
 
   function stepBack() {
@@ -581,9 +588,23 @@
   history.replaceState({ v: 'pick' }, '', location.pathname + location.search);
   render();
 
+  /* Updates: look for a new version whenever the app is opened, and switch to
+     it by reloading, but only on the picker, never in the middle of a sit. */
   if ('serviceWorker' in navigator) {
+    var hadController = !!navigator.serviceWorker.controller;
+    var reg = null;
     window.addEventListener('load', function () {
-      navigator.serviceWorker.register('sw.js').catch(function () {});
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+        .then(function (r) { reg = r; })
+        .catch(function () {});
+    });
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible' && reg) reg.update().catch(function () {});
+    });
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (!hadController) { hadController = true; return; } // first install: nothing to refresh
+      updateReady = true;
+      reloadIfIdle();
     });
   }
 })();

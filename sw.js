@@ -1,6 +1,6 @@
 // Offline cache. Bump VERSION whenever an app file changes.
 // The audio file is versioned by name (sit-bell-v3.ogg) and never changes in place.
-var VERSION = 'sit-v6';
+var VERSION = 'sit-v7';
 var AUDIO = 'sit-bell-v3.ogg';
 var FILES = [
   './',
@@ -9,15 +9,26 @@ var FILES = [
   'app.js',
   'manifest.webmanifest',
   'icons/icon-192.png',
-  'icons/icon-512.png',
-  AUDIO
+  'icons/icon-512.png'
 ];
+
+// GitHub Pages lets browsers reuse files for 10 minutes. Always bypass that
+// here, or a new version can keep serving the old app.js.
+function fresh(url) {
+  return new Request(url, { cache: 'no-cache', credentials: 'same-origin' });
+}
 
 self.addEventListener('install', function (event) {
   event.waitUntil(
-    caches.open(VERSION)
-      .then(function (c) { return c.addAll(FILES); })
-      .then(function () { return self.skipWaiting(); })
+    caches.open(VERSION).then(function (c) {
+      return Promise.all([
+        c.addAll(FILES.map(function (f) { return new Request(f, { cache: 'reload' }); })),
+        // Keep the (large, unchanging) audio from the previous version if we have it.
+        caches.match(AUDIO).then(function (hit) {
+          return hit ? c.put(AUDIO, hit) : c.add(AUDIO);
+        })
+      ]);
+    }).then(function () { return self.skipWaiting(); })
   );
 });
 
@@ -57,9 +68,10 @@ self.addEventListener('fetch', function (event) {
     return;
   }
 
-  // Everything else: network first so updates show up, cache when offline.
+  // Everything else: network first (past the browser cache) so updates show
+  // up straight away; the offline copy when there is no connection.
   event.respondWith(
-    fetch(req)
+    fetch(fresh(req.url))
       .then(function (res) {
         if (res && res.ok) {
           var copy = res.clone();
