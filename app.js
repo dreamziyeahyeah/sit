@@ -252,16 +252,18 @@
     } else if (mode === 'run') {
       var rem = remainingSeconds();
       if (adjusting) {
-        setText(minutesEl, String(clamp(Math.round(pos), MIN, MAX)));
+        setText(minutesEl, clamp(Math.round(pos), MIN, MAX) + ':00');
       } else {
         pos = rem / 60; // the ruler winds back toward 0
-        setText(minutesEl, String(Math.ceil(rem / 60 - 1e-9)));
+        // a live m:ss countdown, so a running timer never looks like the picker
+        var s = Math.ceil(rem - 1e-6);
+        setText(minutesEl, Math.floor(s / 60) + ':' + (s % 60 < 10 ? '0' : '') + (s % 60));
       }
       minutesEl.hidden = false;
       var paused = audio.paused;
       statusEl.hidden = !paused;
       if (paused) setText(statusEl, 'paused');
-      unitEl.hidden = paused;
+      unitEl.hidden = true;
       hintEl.hidden = !paused;
       if (paused) setText(hintEl, 'tap to resume · hold to end');
     } else {
@@ -342,10 +344,22 @@
       if (d >= 1) continue;
       ctx.fillStyle = picking ? colors.soft : (x <= cx + 0.5 ? colors.ink : colors.dim);
       ctx.globalAlpha = 1 - Math.pow(d, 2.2); // ticks soften toward the edges
+      if (!picking && x > cx + 0.5) ctx.globalAlpha *= 0.45; // elapsed side recedes
       var len = m % 10 === 0 ? 26 : m % 5 === 0 ? 18 : 10;
       var px = picking ? Math.round(x * dpr) / dpr : x; // sub-pixel while winding, so it drifts smoothly
       ctx.fillRect(px - 0.5, top, 1, len);
       if (m % 10 === 0) ctx.fillText(String(m), px, top + len + 17);
+    }
+
+    // While sitting: an ink band over the ticks for the time left, the "sand"
+    // that drains into the centre line.
+    if (!picking && pos > 0) {
+      var x0 = Math.max(0, cx - pos * PPM);
+      ctx.fillStyle = colors.ink;
+      for (var bx = x0; bx < cx; bx += 2) {   // soften toward the edge, like the ticks
+        ctx.globalAlpha = 1 - Math.pow((cx - bx) / cx, 2.2);
+        ctx.fillRect(bx, top - 8, Math.min(2, cx - bx), 3);
+      }
     }
 
     // the fixed centre line
