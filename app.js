@@ -8,8 +8,8 @@
   var BELL_AT = 7200;                // seconds into the file where the bell starts
   var MIN = 1, MAX = 120, DEFAULT = 10;
   var KEY = 'sit.minutes';
-  var PPM = 12;                      // ruler: pixels per minute while picking
-  var RUN_PPM = 60;                  // zoomed in while sitting (5x)
+  var PPM = 15;                      // ruler: pixels per minute while picking
+  var RUN_PPM = PPM * 5;             // zoomed in while sitting (5x)
   var ZOOM_MS = 480;                 // how long the zoom in / out takes
   var zoom = PPM;                    // the ruler's current scale (animates)
   function ppm() { return zoom; }
@@ -447,7 +447,7 @@
   /* A flick glides and slows down gently, coming to rest exactly on a whole
      minute: the resting minute is worked out at release, and the glide is one
      smooth exponential curve into it (no friction-then-snap jolt). */
-  var GLIDE = 0.0035;   // per ms: lower glides further
+  var GLIDE = 0.0028;   // per ms: lower glides further
   var glideTarget = null;
   function fling(pxPerMs) {
     stopAnim();
@@ -511,11 +511,13 @@
       moved: false, wasMoving: false, holdFired: false, holdTimer: 0,
       samples: [{ x: e.clientX, t: e.timeStamp }]
     };
-    if ((mode === 'pick' || mode === 'run') && animId) {
+    if (mode === 'pick' && animId) {
       // Nearly at rest: treat it as resting, so this tap acts as a plain tap.
       if (glideLeftPx() < 3) finishGlide();
       else { stopAnim(); glideTarget = null; g.wasMoving = true; render(); }
     }
+    // While sitting, a settling ruler is left to finish on its own: a tap
+    // still pauses / resumes, and only an actual drag takes the ruler over.
     if (mode === 'run') {
       var mine = g;
       setHolding(true);
@@ -538,7 +540,10 @@
       setHolding(false);
     }
     if (g.mode === mode && (mode === 'pick' || mode === 'run') && g.moved) {
-      if (mode === 'run') adjusting = true;
+      if (mode === 'run') {
+        if (animId) { stopAnim(); glideTarget = null; } // the finger takes over from a glide
+        adjusting = true;
+      }
       setPos(pos - (e.clientX - g.lastX) / ppm());
       g.lastX = e.clientX;
       g.samples.push({ x: e.clientX, t: e.timeStamp });
