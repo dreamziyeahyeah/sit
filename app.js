@@ -6,7 +6,7 @@
   --------------------------------------------------------------- */
   var AUDIO_URL = 'sit-bell-v3.ogg'; // 2 h of silence, then the bell
   var BELL_AT = 7200;                // seconds into the file where the bell starts
-  var MIN = 1, MAX = 120, DEFAULT = 10;
+  var MIN = 0, MAX = 120, DEFAULT = 10;  // 0 = ring the bell right away
   var KEY = 'sit.minutes';
   var PPM = 15;                      // ruler: pixels per minute while picking
   var RUN_PPM = PPM * 4;             // zoomed in while sitting (4x)
@@ -14,9 +14,8 @@
   var ZOOM_MS = 480;                 // how long the zoom in / out takes
   var zoom = PPM;                    // the ruler's current scale (animates)
   function ppm() { return zoom; }
-  // Lowest the ruler goes: 1 minute when picking; 0 while sitting (winding it
-  // to 0 rings the bell now, like an egg timer).
-  function lo() { return mode === 'run' ? 0 : MIN; }
+  // Lowest the ruler goes. At 0 the bell rings (once the timer is running).
+  function lo() { return MIN; }
   var SLOP = 8;                      // px a finger may wander and still count as a tap
   var HOLD_MS = 800;                 // hold this long to end a session
 
@@ -108,6 +107,7 @@
   });
 
   function remainingSeconds() {
+    if (zeroHeld) return 0;
     if (pendingSeek !== null) return sessionMinutes * 60;
     return Math.max(0, BELL_AT - audio.currentTime);
   }
@@ -133,7 +133,7 @@
         ]
       });
     } catch (e) {}
-    setHandler('play', function () { if (mode === 'run') audio.play().catch(function () {}); });
+    setHandler('play', function () { if (mode === 'run') resume(); });
     setHandler('pause', function () { if (mode === 'run') audio.pause(); });
     setHandler('stop', function () { endSession(); stepBack(); });
     // No seeking: the lock-screen slider must not move the timer.
@@ -179,6 +179,7 @@
     if (p && p.catch) p.catch(function () { render(); }); // blocked: shows "paused"
     history.pushState({ v: 'session' }, '', '#sitting');
     setupMediaSession();
+    if (n === 0) { ringNow(); return; } // started at 0: the bell, straight away
     render();
     startTicker();
   }
@@ -186,21 +187,32 @@
   // Sliding during a session: the ruler came to rest on a new time left.
   // Move the track so the bell lands exactly that many minutes from now.
   var adjusting = false;     // the finger (or a glide) owns the ruler, not the audio
+  // Wound to 0 while paused: wait at 0, and ring when it is resumed.
+  var zeroHeld = false;
+
+  // Ring the bell now and show "done".
+  function ringNow() {
+    zeroHeld = false;
+    if (audio.readyState >= 1) { pendingSeek = null; audio.currentTime = BELL_AT; }
+    else pendingSeek = BELL_AT;
+    if (audio.paused) audio.play().catch(function () {});
+    mode = 'done';
+    stopAnim();
+    stopTicker();
+    updateMediaState();
+    render();
+  }
+
   function applyAdjust(n) {
     adjusting = false;
     if (mode !== 'run') return;
     n = clamp(Math.round(n), lo(), MAX);
     if (n === 0) {
-      // Wound down to 0: ring the bell now.
-      if (audio.readyState >= 1) { pendingSeek = null; audio.currentTime = BELL_AT; }
-      else pendingSeek = BELL_AT;
-      if (audio.paused) audio.play().catch(function () {});
-      mode = 'done';
-      stopTicker();
-      updateMediaState();
-      render();
+      if (audio.paused) { zeroHeld = true; render(); } // paused: just sit at 0
+      else ringNow();                                  // running: ring now
       return;
     }
+    zeroHeld = false;
     sessionMinutes = n;
     sessionStart = BELL_AT - n * 60;
     if (audio.readyState >= 1) {
@@ -214,9 +226,15 @@
     render();
   }
 
+  function resume() {
+    if (zeroHeld) { ringNow(); return; } // resumed at 0: time is up
+    audio.play().catch(function () { render(); });
+    render();
+  }
+
   function togglePause() {
-    if (audio.paused) audio.play().catch(function () { render(); });
-    else audio.pause();
+    if (audio.paused) { resume(); return; }
+    audio.pause();
     render(); // react right away (zoom, "paused") instead of waiting for the audio event
   }
 
@@ -224,6 +242,7 @@
   function endSession() {
     stopAnim();
     adjusting = false;
+    zeroHeld = false;
     if (mode === 'run') {
       clearMediaSession();
       resetAudio();
