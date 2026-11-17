@@ -3,8 +3,6 @@
   --ink: #2b2925;
   --ink-soft: #6f6a5f;
   --ink-dim: #a8a191;   /* used while a session runs */
-  --ink-faint: #ddd6c6; /* the dial's empty track */
-  --dial: min(78vw, 50vh, 320px);
   --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
 }
 
@@ -14,7 +12,6 @@
     --ink: #e6e0d2;
     --ink-soft: #9a9384;
     --ink-dim: #5f5a52;
-    --ink-faint: #3a3731;
   }
 }
 
@@ -107,46 +104,28 @@ body {
   height: 92px;
 }
 
-.stage { position: relative; }
-.dial, .hold { display: none; }
-
-/* ---- sitting: a quiet dial that empties as the time passes ---- */
-.run .ruler, .done .ruler { display: none; }
-
-.run .stage, .done .stage {
-  width: var(--dial);
-  height: var(--dial);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.run .dial, .done .dial {
-  display: block;
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
-.run .readout, .done .readout {
+.stage {
   position: relative;
-  height: auto;
-  margin: 0;
-  justify-content: center;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
-.run .minutes { font-size: 84px; color: var(--ink-soft); }
+.hold { display: none; }
+
+/* ---- sitting: the same ruler winds back to 0, like an egg timer ---- */
 .run .unit, .run .status { color: var(--ink-dim); }
 .run .bar-title, .done .bar-title { color: var(--ink-dim); }
 
 .done .status {
-  margin: 0;
-  font-size: 30px;
+  font-size: 28px;
   color: var(--ink-soft);
 }
 
-/* under the dial: a small hint, and the line that fills while you hold to end */
+/* under the ruler: a small hint, and the line that fills while you hold to end */
 .hint {
   position: absolute;
-  top: calc(100% + 32px);
+  top: calc(100% + 20px);
   left: 0;
   right: 0;
   text-align: center;
@@ -158,7 +137,7 @@ body {
 .run .hold {
   display: block;
   position: absolute;
-  top: calc(100% + 68px);
+  top: calc(100% + 56px);
   left: 50%;
   width: 120px;
   margin-left: -60px;
@@ -175,7 +154,6 @@ body {
 @media (max-height: 560px) {
   .readout { height: 120px; margin-bottom: 16px; }
   .minutes { font-size: 80px; }
-  .run .minutes { font-size: 64px; }
-  .hint { top: calc(100% + 18px); }
-  .run .hold { top: calc(100% + 46px); }
+  .hint { top: calc(100% + 10px); }
+  .run .hold { top: calc(100% + 40px); }
 }

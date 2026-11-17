@@ -1,7 +1,10 @@
-"""Builds sit-bell-v1.ogg: 2 hours of silence followed by one soft singing-bowl strike.
+"""Builds sit-bell-v2.ogg: 2 hours of silence followed by one soft bell strike.
 
 The app starts playback N minutes before the bell, so the phone simply plays the
 file through (even with the screen off) and the bell rings at the end.
+
+v2: shorter (about 5 s), pure partials with no detuned pairs (v1's beating
+sounded phasey), and no hiss (see the concat note below).
 
 Needs ffmpeg with libopus on PATH. No Python packages required.
 """
@@ -9,40 +12,36 @@ import math, os, struct, subprocess, wave
 
 RATE = 48000
 SILENCE_S = 7200          # 120 minutes: the longest session
-BELL_S = 11.0             # length of the bell tail
+BELL_S = 5.5              # total length of the bell
+FADE_S = 1.5              # gentle fade over the last part, so it ends in silence
 OUT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TMP_WAV = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'bell.wav')
-OUT = os.path.join(OUT_DIR, 'sit-bell-v1.ogg')
+OUT = os.path.join(OUT_DIR, 'sit-bell-v2.ogg')
 
-# Singing-bowl partials: (frequency ratio, relative amplitude, decay time in s, beat Hz)
-F0 = 196.0  # G3: low and warm
+# Bell partials: (frequency ratio, relative amplitude, decay time constant in s)
+F0 = 220.0  # A3: low and warm
 PARTIALS = [
-    (1.000, 1.00, 9.0, 0.35),
-    (2.756, 0.42, 5.5, 0.80),
-    (5.404, 0.16, 3.2, 1.30),
-    (8.933, 0.05, 1.8, 1.90),
+    (1.000, 1.00, 1.9),
+    (2.000, 0.30, 1.2),
+    (2.756, 0.22, 0.9),
+    (5.404, 0.06, 0.5),
 ]
-ATTACK_S = 0.06            # soft mallet: no click
-PEAK = 0.50                # about -6 dBFS: present but not startling
+ATTACK_S = 0.012           # soft mallet: rounded, no click
+PEAK = 0.45                # about -7 dBFS: present but not startling
 
 
 def bell_samples():
     n = int(BELL_S * RATE)
     out = [0.0] * n
-    for ratio, amp, decay, beat in PARTIALS:
-        f = F0 * ratio
-        # two slightly detuned components give the slow "wah" beating of a real bowl
-        f1, f2 = f - beat / 2, f + beat / 2
-        w1, w2 = 2 * math.pi * f1 / RATE, 2 * math.pi * f2 / RATE
+    for ratio, amp, decay in PARTIALS:
+        w = 2 * math.pi * F0 * ratio / RATE
         k = 1.0 / (decay * RATE)
         for i in range(n):
-            env = math.exp(-i * k)
-            out[i] += amp * env * 0.5 * (math.sin(w1 * i) + math.sin(w2 * i + 0.7))
-    # raised-cosine attack and a final fade so nothing clicks
+            out[i] += amp * math.exp(-i * k) * math.sin(w * i)
     a = int(ATTACK_S * RATE)
     for i in range(a):
         out[i] *= 0.5 - 0.5 * math.cos(math.pi * i / a)
-    f = int(1.0 * RATE)
+    f = int(FADE_S * RATE)
     for i in range(f):
         out[n - f + i] *= 0.5 + 0.5 * math.cos(math.pi * i / f)
     peak = max(abs(s) for s in out) or 1.0
@@ -54,7 +53,7 @@ def write_wav(path, samples):
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(RATE)
-        w.writeframes(b''.join(struct.pack('<h', max(-32767, min(32767, int(s * 32767)))) for s in samples))
+        w.writeframes(b''.join(struct.pack('<h', max(-32767, min(32767, round(s * 32767)))) for s in samples))
 
 
 write_wav(TMP_WAV, bell_samples())
@@ -62,8 +61,13 @@ subprocess.run([
     'ffmpeg', '-hide_banner', '-loglevel', 'error', '-y',
     '-f', 'lavfi', '-i', f'anullsrc=r={RATE}:cl=mono:d={SILENCE_S}',
     '-i', TMP_WAV,
-    '-filter_complex', '[0][1]concat=n=2:v=0:a=1',
-    '-c:a', 'libopus', '-b:a', '64k', '-vbr', 'on', '-application', 'audio',
+    # Both inputs as s16 mono before joining: mixing the float silence with the
+    # s16 bell made the concat add audible hiss (this was v1's "white noise").
+    '-filter_complex',
+    '[0]aformat=sample_fmts=s16:channel_layouts=mono[a];'
+    '[1]aformat=sample_fmts=s16:channel_layouts=mono[b];'
+    '[a][b]concat=n=2:v=0:a=1',
+    '-c:a', 'libopus', '-b:a', '96k', '-vbr', 'on', '-application', 'audio',
     OUT,
 ], check=True)
 os.remove(TMP_WAV)

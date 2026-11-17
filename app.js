@@ -4,7 +4,7 @@
   /* ---------------------------------------------------------------
      Constants
   --------------------------------------------------------------- */
-  var AUDIO_URL = 'sit-bell-v1.ogg'; // 2 h of silence, then the bell
+  var AUDIO_URL = 'sit-bell-v2.ogg'; // 2 h of silence, then the bell
   var BELL_AT = 7200;                // seconds into the file where the bell starts
   var MIN = 1, MAX = 120, DEFAULT = 10;
   var KEY = 'sit.minutes';
@@ -20,8 +20,6 @@
   var hintEl = $('hint');
   var canvas = $('ruler');
   var ctx = canvas.getContext('2d');
-  var dial = $('dial');
-  var dctx = dial.getContext('2d');
 
   function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
@@ -227,9 +225,9 @@
       unitEl.hidden = false;
       statusEl.hidden = true;
       hintEl.hidden = true;
-      draw();
     } else if (mode === 'run') {
       var rem = remainingSeconds();
+      pos = rem / 60; // the ruler winds back toward 0
       setText(minutesEl, String(Math.ceil(rem / 60 - 1e-9)));
       minutesEl.hidden = false;
       var paused = audio.paused;
@@ -238,16 +236,16 @@
       unitEl.hidden = paused;
       hintEl.hidden = !paused;
       if (paused) setText(hintEl, 'tap to resume · hold to end');
-      drawDial(rem / (sessionMinutes * 60), paused);
     } else {
+      pos = 0;
       minutesEl.hidden = true;
       unitEl.hidden = true;
       statusEl.hidden = false;
       setText(statusEl, 'done');
       hintEl.hidden = false;
       setText(hintEl, 'tap to return');
-      drawDial(0, false);
     }
+    draw();
   }
 
   // Hold-to-end feedback: a line under the dial fills over the hold.
@@ -269,7 +267,6 @@
     colors.ink = cs.getPropertyValue('--ink').trim();
     colors.soft = cs.getPropertyValue('--ink-soft').trim();
     colors.dim = cs.getPropertyValue('--ink-dim').trim();
-    colors.faint = cs.getPropertyValue('--ink-faint').trim();
     colors.font = cs.getPropertyValue('--serif').trim();
   }
   readColors();
@@ -292,44 +289,6 @@
   }
   window.addEventListener('resize', render);
 
-  /* The dial: a faint ring with a mark per minute (every 5 past an hour),
-     and an ink arc from the top for the time that is left. */
-  function drawDial(frac, paused) {
-    if (!fit(dial)) return;
-    var s = dial.clientWidth;
-    var c = s / 2, r = c - 4;
-    dctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    dctx.clearRect(0, 0, s, s);
-
-    dctx.strokeStyle = colors.faint;
-    dctx.lineWidth = 1;
-    dctx.beginPath();
-    dctx.arc(c, c, r, 0, Math.PI * 2);
-    dctx.stroke();
-
-    var n = sessionMinutes || 1;
-    var step = n <= 60 ? 1 : 5;
-    dctx.beginPath();
-    for (var i = 0; i < n; i += step) {
-      var a = -Math.PI / 2 + (i / n) * Math.PI * 2;
-      var len = i === 0 ? 10 : 5;
-      dctx.moveTo(c + Math.cos(a) * (r - 9), c + Math.sin(a) * (r - 9));
-      dctx.lineTo(c + Math.cos(a) * (r - 9 - len), c + Math.sin(a) * (r - 9 - len));
-    }
-    dctx.stroke();
-
-    frac = clamp(frac, 0, 1);
-    if (frac > 0) {
-      dctx.strokeStyle = paused ? colors.dim : colors.soft;
-      dctx.lineWidth = 2.5;
-      dctx.lineCap = 'round';
-      dctx.beginPath();
-      dctx.arc(c, c, r, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
-      dctx.stroke();
-      dctx.lineCap = 'butt';
-    }
-  }
-
   function draw() {
     if (!fit(canvas)) return;
     var w = canvas.clientWidth, h = canvas.clientHeight;
@@ -337,32 +296,33 @@
     ctx.clearRect(0, 0, w, h);
 
     var cx = w / 2;
-    var tickColor = colors.soft;
-    var lineColor = colors.ink;
+    var picking = mode === 'pick';
     var top = 22;
     var span = cx / PPM + 2;
     var from = Math.max(0, Math.floor(pos - span));
     var to = Math.min(MAX, Math.ceil(pos + span));
 
-    ctx.fillStyle = tickColor;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
     ctx.font = 'italic 13px ' + colors.font;
 
+    // While sitting, the stretch from 0 up to the centre line is the time
+    // left: it stays in ink and winds down into the line, like an egg timer.
     for (var m = from; m <= to; m++) {
       var x = cx + (m - pos) * PPM;
       var d = Math.abs(x - cx) / cx;
       if (d >= 1) continue;
+      ctx.fillStyle = picking ? colors.soft : (x <= cx + 0.5 ? colors.ink : colors.dim);
       ctx.globalAlpha = 1 - Math.pow(d, 2.2); // ticks soften toward the edges
       var len = m % 10 === 0 ? 26 : m % 5 === 0 ? 18 : 10;
-      var px = Math.round(x * dpr) / dpr;
+      var px = picking ? Math.round(x * dpr) / dpr : x; // sub-pixel while winding, so it drifts smoothly
       ctx.fillRect(px - 0.5, top, 1, len);
       if (m % 10 === 0) ctx.fillText(String(m), px, top + len + 17);
     }
 
     // the fixed centre line
     ctx.globalAlpha = 1;
-    ctx.fillStyle = lineColor;
+    ctx.fillStyle = colors.ink;
     ctx.fillRect(Math.round(cx * dpr) / dpr - 0.75, top - 14, 1.5, 48);
   }
 
@@ -382,6 +342,7 @@
 
   function snap() {
     stopAnim();
+    glideTarget = null;
     var target = clamp(Math.round(pos), MIN, MAX);
     var from = pos, t0 = 0, dur = 160;
     function step(t) {
@@ -402,24 +363,44 @@
     animId = requestAnimationFrame(step);
   }
 
+  /* A flick glides and slows down gently, coming to rest exactly on a whole
+     minute: the resting minute is worked out at release, and the glide is one
+     smooth exponential curve into it (no friction-then-snap jolt). */
+  var GLIDE = 0.0035;   // per ms: lower glides further
+  var glideTarget = null;
   function fling(pxPerMs) {
     stopAnim();
-    if (Math.abs(pxPerMs) < 0.3) { snap(); return; }
-    pxPerMs = clamp(pxPerMs, -3, 3); // a hard flick glides ~30 minutes, not the whole ruler
-    var v = -pxPerMs / PPM; // minutes per ms (dragging left adds minutes)
-    var last = 0;
+    if (Math.abs(pxPerMs) < 0.25) { snap(); return; }
+    pxPerMs = clamp(pxPerMs, -5, 5);
+    var v = -pxPerMs / PPM;                     // minutes per ms (dragging left adds minutes)
+    var target = clamp(Math.round(pos + v / GLIDE), MIN, MAX);
+    var dist = target - pos;
+    if (Math.abs(dist) < 0.01 || dist * v <= 0) { snap(); return; }
+    var k = clamp(v / dist, 0.002, 0.03);       // match the finger's speed at release
+    var from = pos, t0 = 0;
+    glideTarget = target;
     function step(t) {
-      if (!last) last = t;
-      var dt = Math.min(48, t - last);
-      last = t;
-      pos += v * dt;
-      v *= Math.pow(0.992, dt);
-      if (pos <= MIN || pos >= MAX) { pos = clamp(pos, MIN, MAX); snap(); return; }
-      if (Math.abs(v) * PPM < 0.04) { snap(); return; }
+      if (!t0) t0 = t;
+      var left = dist * Math.exp(-k * (t - t0));
+      if (Math.abs(left) * PPM < 0.15) { finishGlide(); return; }
+      pos = target - left;
       render();
       animId = requestAnimationFrame(step);
     }
     animId = requestAnimationFrame(step);
+  }
+  // Land the glide on its minute now.
+  function finishGlide() {
+    stopAnim();
+    if (glideTarget === null) return;
+    pos = glideTarget;
+    glideTarget = null;
+    if (pos !== chosen) { chosen = pos; saveMinutes(chosen); }
+    render();
+  }
+  // Pixels the ruler still has to travel (0 when resting).
+  function glideLeftPx() {
+    return animId && glideTarget !== null ? Math.abs(glideTarget - pos) * PPM : animId ? Infinity : 0;
   }
 
   /* ---------------------------------------------------------------
@@ -440,7 +421,11 @@
       moved: false, wasMoving: false, holdFired: false, holdTimer: 0,
       samples: [{ x: e.clientX, t: e.timeStamp }]
     };
-    if (mode === 'pick' && animId) { stopAnim(); g.wasMoving = true; render(); }
+    if (mode === 'pick' && animId) {
+      // Nearly at rest: treat it as resting, so this tap can start the timer.
+      if (glideLeftPx() < 3) finishGlide();
+      else { stopAnim(); glideTarget = null; g.wasMoving = true; render(); }
+    }
     if (mode === 'run') {
       var mine = g;
       setHolding(true);
