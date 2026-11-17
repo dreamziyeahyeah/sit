@@ -518,7 +518,7 @@
   /* ---------------------------------------------------------------
      Gestures. The whole screen is the control:
        pick: slide to set, tap to begin
-       run:  slide to change the time left, tap to pause / resume, hold to end
+       run:  tap to pause / resume, hold to end; slide to change the time left only while paused
        done: tap to go back to the ruler
   --------------------------------------------------------------- */
   var g = null;
@@ -531,6 +531,8 @@
       id: e.pointerId, mode: mode,
       x: e.clientX, y: e.clientY, lastX: e.clientX,
       moved: false, wasMoving: false, holdFired: false, holdTimer: 0,
+      // While the timer counts down the ruler is fixed: slide only when paused.
+      locked: mode === 'run' && !audio.paused,
       samples: [{ x: e.clientX, t: e.timeStamp }]
     };
     if (mode === 'pick' && animId) {
@@ -561,7 +563,7 @@
       clearTimeout(g.holdTimer);
       setHolding(false);
     }
-    if (g.mode === mode && (mode === 'pick' || mode === 'run') && g.moved) {
+    if (g.mode === mode && (mode === 'pick' || mode === 'run') && g.moved && !g.locked) {
       if (mode === 'run') {
         if (animId) { stopAnim(); glideTarget = null; } // the finger takes over from a glide
         adjusting = true;
@@ -587,6 +589,7 @@
     clearTimeout(gg.holdTimer);
     setHolding(false);
     if (gg.holdFired || gg.mode !== mode) return; // the screen changed mid-gesture
+    if (gg.locked && gg.moved) return;            // a swipe while counting down does nothing
 
     if (mode === 'pick' || mode === 'run') {
       if (gg.moved) fling(velocity(gg.samples, e.clientX, e.timeStamp));
@@ -602,7 +605,7 @@
     if (!g || e.pointerId !== g.id) return;
     clearTimeout(g.holdTimer);
     setHolding(false);
-    var wasDragging = g.mode === mode && (g.moved || g.wasMoving);
+    var wasDragging = g.mode === mode && !g.locked && (g.moved || g.wasMoving);
     g = null;
     if (wasDragging && (mode === 'pick' || mode === 'run')) snap();
   });
