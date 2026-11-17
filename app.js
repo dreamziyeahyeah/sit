@@ -17,8 +17,11 @@
   var minutesEl = $('minutes');
   var unitEl = $('unit');
   var statusEl = $('status');
+  var hintEl = $('hint');
   var canvas = $('ruler');
   var ctx = canvas.getContext('2d');
+  var dial = $('dial');
+  var dctx = dial.getContext('2d');
 
   function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
@@ -216,30 +219,43 @@
      Rendering
   --------------------------------------------------------------- */
   function render() {
-    app.className = mode;
+    var cls = mode + (holding && mode === 'run' ? ' holding' : '');
+    if (app.className !== cls) app.className = cls;
     if (mode === 'pick') {
       setText(minutesEl, String(clamp(Math.round(pos), MIN, MAX)));
       minutesEl.hidden = false;
       unitEl.hidden = false;
       statusEl.hidden = true;
+      hintEl.hidden = true;
+      draw();
     } else if (mode === 'run') {
       var rem = remainingSeconds();
-      pos = rem / 60;
       setText(minutesEl, String(Math.ceil(rem / 60 - 1e-9)));
       minutesEl.hidden = false;
-      unitEl.hidden = false;
       var paused = audio.paused;
       statusEl.hidden = !paused;
       if (paused) setText(statusEl, 'paused');
       unitEl.hidden = paused;
+      hintEl.hidden = !paused;
+      if (paused) setText(hintEl, 'tap to resume · hold to end');
+      drawDial(rem / (sessionMinutes * 60), paused);
     } else {
-      pos = 0;
       minutesEl.hidden = true;
       unitEl.hidden = true;
       statusEl.hidden = false;
       setText(statusEl, 'done');
+      hintEl.hidden = false;
+      setText(hintEl, 'tap to return');
+      drawDial(0, false);
     }
-    draw();
+  }
+
+  // Hold-to-end feedback: a line under the dial fills over the hold.
+  var holding = false;
+  function setHolding(on) {
+    if (holding === on) return;
+    holding = on;
+    render();
   }
 
   function setText(el, t) { if (el.textContent !== t) el.textContent = t; }
@@ -253,36 +269,76 @@
     colors.ink = cs.getPropertyValue('--ink').trim();
     colors.soft = cs.getPropertyValue('--ink-soft').trim();
     colors.dim = cs.getPropertyValue('--ink-dim').trim();
+    colors.faint = cs.getPropertyValue('--ink-faint').trim();
     colors.font = cs.getPropertyValue('--serif').trim();
   }
   readColors();
   try {
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () {
       readColors();
-      draw();
+      render();
     });
   } catch (e) {}
 
   var dpr = 1;
-  function sizeCanvas() {
+  // Match a canvas's backing store to its on-screen size. Returns false while hidden.
+  function fit(c) {
     dpr = window.devicePixelRatio || 1;
-    var w = canvas.clientWidth, h = canvas.clientHeight;
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
-    draw();
+    var w = c.clientWidth, h = c.clientHeight;
+    if (!w || !h) return false;
+    var W = Math.round(w * dpr), H = Math.round(h * dpr);
+    if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
+    return true;
   }
-  window.addEventListener('resize', sizeCanvas);
+  window.addEventListener('resize', render);
+
+  /* The dial: a faint ring with a mark per minute (every 5 past an hour),
+     and an ink arc from the top for the time that is left. */
+  function drawDial(frac, paused) {
+    if (!fit(dial)) return;
+    var s = dial.clientWidth;
+    var c = s / 2, r = c - 4;
+    dctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    dctx.clearRect(0, 0, s, s);
+
+    dctx.strokeStyle = colors.faint;
+    dctx.lineWidth = 1;
+    dctx.beginPath();
+    dctx.arc(c, c, r, 0, Math.PI * 2);
+    dctx.stroke();
+
+    var n = sessionMinutes || 1;
+    var step = n <= 60 ? 1 : 5;
+    dctx.beginPath();
+    for (var i = 0; i < n; i += step) {
+      var a = -Math.PI / 2 + (i / n) * Math.PI * 2;
+      var len = i === 0 ? 10 : 5;
+      dctx.moveTo(c + Math.cos(a) * (r - 9), c + Math.sin(a) * (r - 9));
+      dctx.lineTo(c + Math.cos(a) * (r - 9 - len), c + Math.sin(a) * (r - 9 - len));
+    }
+    dctx.stroke();
+
+    frac = clamp(frac, 0, 1);
+    if (frac > 0) {
+      dctx.strokeStyle = paused ? colors.dim : colors.soft;
+      dctx.lineWidth = 2.5;
+      dctx.lineCap = 'round';
+      dctx.beginPath();
+      dctx.arc(c, c, r, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
+      dctx.stroke();
+      dctx.lineCap = 'butt';
+    }
+  }
 
   function draw() {
+    if (!fit(canvas)) return;
     var w = canvas.clientWidth, h = canvas.clientHeight;
-    if (!w || !h) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
     var cx = w / 2;
-    var picking = mode === 'pick';
-    var tickColor = picking ? colors.soft : colors.dim;
-    var lineColor = picking ? colors.ink : colors.dim;
+    var tickColor = colors.soft;
+    var lineColor = colors.ink;
     var top = 22;
     var span = cx / PPM + 2;
     var from = Math.max(0, Math.floor(pos - span));
@@ -387,9 +443,11 @@
     if (mode === 'pick' && animId) { stopAnim(); g.wasMoving = true; render(); }
     if (mode === 'run') {
       var mine = g;
+      setHolding(true);
       g.holdTimer = setTimeout(function () {
         if (g === mine && !mine.moved && mode === 'run') {
           mine.holdFired = true;
+          setHolding(false);
           endSession();
           stepBack();
         }
@@ -402,6 +460,7 @@
     if (!g.moved && Math.hypot(e.clientX - g.x, e.clientY - g.y) > SLOP) {
       g.moved = true;
       clearTimeout(g.holdTimer);
+      setHolding(false);
     }
     if (g.mode === 'pick' && mode === 'pick' && g.moved) {
       setPos(pos - (e.clientX - g.lastX) / PPM);
@@ -423,6 +482,7 @@
     var gg = g;
     g = null;
     clearTimeout(gg.holdTimer);
+    setHolding(false);
     if (gg.holdFired || gg.mode !== mode) return; // the screen changed mid-gesture
 
     if (mode === 'pick') {
@@ -439,6 +499,7 @@
   app.addEventListener('pointercancel', function (e) {
     if (!g || e.pointerId !== g.id) return;
     clearTimeout(g.holdTimer);
+    setHolding(false);
     var wasDragging = g.mode === 'pick' && (g.moved || g.wasMoving);
     g = null;
     if (wasDragging && mode === 'pick') snap();
@@ -490,7 +551,6 @@
      Start
   --------------------------------------------------------------- */
   history.replaceState({ v: 'pick' }, '', location.pathname + location.search);
-  sizeCanvas();
   render();
 
   if ('serviceWorker' in navigator) {

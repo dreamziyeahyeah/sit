@@ -3,6 +3,8 @@
   --ink: #2b2925;
   --ink-soft: #6f6a5f;
   --ink-dim: #a8a191;   /* used while a session runs */
+  --ink-faint: #ddd6c6; /* the dial's empty track */
+  --dial: min(78vw, 50vh, 320px);
   --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
 }
 
@@ -11,7 +13,8 @@
     --paper: #1f1d1a;
     --ink: #e6e0d2;
     --ink-soft: #9a9384;
-    --ink-dim: #55504a;
+    --ink-dim: #5f5a52;
+    --ink-faint: #3a3731;
   }
 }
 
@@ -96,7 +99,7 @@ body {
   font-style: italic;
   color: var(--ink-soft);
 }
-.status[hidden], .minutes[hidden], .unit[hidden] { display: none; }
+.status[hidden], .minutes[hidden], .unit[hidden], .hint[hidden] { display: none; }
 
 .ruler {
   display: block;
@@ -104,20 +107,75 @@ body {
   height: 92px;
 }
 
-/* ---- running: everything steps back ---- */
-.run .bar-title,
-.run .minutes,
-.run .unit,
-.run .status { color: var(--ink-dim); }
+.stage { position: relative; }
+.dial, .hold { display: none; }
 
-/* ---- done ---- */
+/* ---- sitting: a quiet dial that empties as the time passes ---- */
+.run .ruler, .done .ruler { display: none; }
+
+.run .stage, .done .stage {
+  width: var(--dial);
+  height: var(--dial);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.run .dial, .done .dial {
+  display: block;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.run .readout, .done .readout {
+  position: relative;
+  height: auto;
+  margin: 0;
+  justify-content: center;
+}
+.run .minutes { font-size: 84px; color: var(--ink-soft); }
+.run .unit, .run .status { color: var(--ink-dim); }
+.run .bar-title, .done .bar-title { color: var(--ink-dim); }
+
 .done .status {
-  font-size: 28px;
+  margin: 0;
+  font-size: 30px;
   color: var(--ink-soft);
 }
-.done .bar-title { color: var(--ink-dim); }
+
+/* under the dial: a small hint, and the line that fills while you hold to end */
+.hint {
+  position: absolute;
+  top: calc(100% + 32px);
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 14px;
+  font-style: italic;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+.run .hold {
+  display: block;
+  position: absolute;
+  top: calc(100% + 68px);
+  left: 50%;
+  width: 120px;
+  margin-left: -60px;
+  height: 1px;
+  background: var(--ink-soft);
+  transform: scaleX(0);
+}
+/* starts after a short delay so a quick tap shows nothing; full at 1.5 s */
+.run.holding .hold {
+  transform: scaleX(1);
+  transition: transform 1.3s linear .2s;
+}
 
 @media (max-height: 560px) {
   .readout { height: 120px; margin-bottom: 16px; }
   .minutes { font-size: 80px; }
+  .run .minutes { font-size: 64px; }
+  .hint { top: calc(100% + 18px); }
+  .run .hold { top: calc(100% + 46px); }
 }

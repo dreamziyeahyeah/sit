@@ -22,10 +22,15 @@
   </header>
 
   <div class="face">
-    <div class="readout">
-      <div id="minutes" class="minutes">10</div>
-      <div id="unit" class="unit">min</div>
-      <div id="status" class="status" hidden></div>
+    <div class="stage">
+      <canvas id="dial" class="dial" aria-hidden="true"></canvas>
+      <div class="readout">
+        <div id="minutes" class="minutes">10</div>
+        <div id="unit" class="unit">min</div>
+        <div id="status" class="status" hidden></div>
+      </div>
+      <div id="hint" class="hint" hidden></div>
+      <div class="hold" aria-hidden="true"></div>
     </div>
     <canvas id="ruler" class="ruler" aria-hidden="true"></canvas>
   </div>
